@@ -2,12 +2,49 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Network, Eye, EyeOff } from "lucide-react";
+import { BriefcaseBusiness, Eye, EyeOff, Network, ShieldCheck, UserCheck, UsersRound } from "lucide-react";
 import { useRoleContext } from "@/providers/RoleProvider";
 import { getDefaultPathForRole } from "@/lib/rbac";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+const sharedDemoPassword = process.env.NEXT_PUBLIC_DEMO_PASSWORD || "";
+
+const demoLogins = [
+  {
+    label: "Super Admin",
+    email: process.env.NEXT_PUBLIC_DEMO_SUPERADMIN_EMAIL || process.env.NEXT_PUBLIC_DEMO_ADMIN_EMAIL || "",
+    password: process.env.NEXT_PUBLIC_DEMO_SUPERADMIN_PASSWORD || process.env.NEXT_PUBLIC_DEMO_ADMIN_PASSWORD || sharedDemoPassword,
+    icon: ShieldCheck,
+  },
+  {
+    label: "HR Admin",
+    email: process.env.NEXT_PUBLIC_DEMO_HR_EMAIL || "",
+    password: process.env.NEXT_PUBLIC_DEMO_HR_PASSWORD || sharedDemoPassword,
+    icon: UserCheck,
+  },
+  {
+    label: "Recruiter",
+    email: process.env.NEXT_PUBLIC_DEMO_RECRUITER_EMAIL || "",
+    password: process.env.NEXT_PUBLIC_DEMO_RECRUITER_PASSWORD || sharedDemoPassword,
+    icon: UsersRound,
+  },
+  {
+    label: "Employee",
+    email: process.env.NEXT_PUBLIC_DEMO_EMPLOYEE_EMAIL || "",
+    password: process.env.NEXT_PUBLIC_DEMO_EMPLOYEE_PASSWORD || sharedDemoPassword,
+    icon: UserCheck,
+  },
+  {
+    label: "Sales",
+    email: process.env.NEXT_PUBLIC_DEMO_SALES_EMAIL || "",
+    password: process.env.NEXT_PUBLIC_DEMO_SALES_PASSWORD || sharedDemoPassword,
+    icon: BriefcaseBusiness,
+  },
+].filter((account) => account.email && account.password);
+
+const showDemoLogins = process.env.NEXT_PUBLIC_SHOW_DEMO_LOGINS === "true" && demoLogins.length > 0;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,6 +67,17 @@ export default function LoginPage() {
     setMessage("");
 
     const result = await login({ email, password });
+    setMessage(result.message);
+    setSubmitting(false);
+  };
+
+  const handleDemoLogin = async (account: (typeof demoLogins)[number]) => {
+    setEmail(account.email);
+    setPassword(account.password);
+    setSubmitting(true);
+    setMessage("");
+
+    const result = await login({ email: account.email, password: account.password });
     setMessage(result.message);
     setSubmitting(false);
   };
@@ -95,6 +143,27 @@ export default function LoginPage() {
               <h2 className="text-2xl font-semibold text-slate-900">تسجيل الدخول</h2>
               <p className="text-sm text-slate-500">أدخل بياناتك للوصول إلى لوحة التحكم.</p>
             </div>
+
+            {showDemoLogins && (
+              <div className="mt-6 grid grid-cols-2 gap-2">
+                {demoLogins.map((account) => {
+                  const Icon = account.icon;
+                  return (
+                    <Button
+                      key={account.email}
+                      type="button"
+                      variant="outline"
+                      className="h-11 justify-start gap-2 border-slate-200 bg-white px-3 text-slate-700 hover:border-brand/40 hover:bg-brand/5 hover:text-brand-dark"
+                      disabled={submitting}
+                      onClick={() => handleDemoLogin(account)}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span className="truncate">{account.label}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               <div className="space-y-2">
