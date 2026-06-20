@@ -1,0 +1,144 @@
+import { createClient } from "@/lib/supabase/client";
+
+export async function getAttendance(orgId: string, workDate?: string) {
+  const supabase = createClient();
+  let query = supabase
+    .from("attendance_records")
+    .select("*, employee:employee_id(full_name, employee_code, manager_id), location:location_id(name), shift:shift_id(name, shift_type, location:location_id(name))")
+    .eq("org_id", orgId)
+    .order("check_in_at", { ascending: false });
+
+  if (workDate) {
+    query = query.eq("work_date", workDate);
+  }
+
+  const result = await query;
+  return result as unknown as { data: Record<string, unknown>[] | null; error: { message: string } | null };
+}
+
+export async function getEmployeeAttendance(employeeId: string, workDate?: string) {
+  const supabase = createClient();
+  let query = supabase
+    .from("attendance_records")
+    .select("*")
+    .eq("employee_id", employeeId)
+    .order("work_date", { ascending: false });
+
+  if (workDate) {
+    query = query.eq("work_date", workDate);
+  }
+
+  const result = await query;
+  return result as unknown as { data: Record<string, unknown>[] | null; error: { message: string } | null };
+}
+
+export async function createCheckIn(values: Record<string, unknown>) {
+  const supabase = createClient();
+  const employeeId = values.employee_id as string;
+  const currentDevice = values.device_fingerprint as string || values.check_in_device as string;
+
+  const workDate = String(values.work_date || new Date().toISOString().split("T")[0]);
+  const empRes = await supabase.from("employees").select("registered_device_id, can_multi_checkin").eq("id", employeeId).single();
+  const employee = empRes.data as { registered_device_id?: string | null; can_multi_checkin?: boolean | null } | null;
+  const registeredDevice = employee?.registered_device_id;
+  const canMultiCheckin = Boolean(employee?.can_multi_checkin);
+
+  if (!canMultiCheckin) {
+    const existing = await supabase
+      .from("attendance_records")
+      .select("id")
+      .eq("employee_id", employeeId)
+      .eq("work_date", workDate)
+      .limit(1);
+
+    if (existing.error) return { data: null, error: { message: existing.error.message } };
+    if ((existing.data || []).length > 0) {
+      return { data: null, error: { message: "You have already checked in for today." } };
+    }
+  }
+
+  if (registeredDevice && registeredDevice !== currentDevice) {
+    return { data: null, error: { message: "Attendance locked to your registered device. Please use your primary device." } };
+  } else if (!registeredDevice) {
+    await supabase.from("employees").update({
+      registered_device_id: currentDevice,
+      registered_device_name: values.check_in_device || "Registered mobile device",
+    } as never).eq("id", employeeId);
+  }
+
+  values.is_registered_device = true;
+
+  const result = await supabase
+    .from("attendance_records")
+    .insert(values as never)
+    .select()
+    .single();
+
+  if (result.error && result.error.code === "23505") { // unique constraint violation
+    return { data: null, error: { message: "You have already checked in for today." } };
+  }
+
+  return result as unknown as { data: Record<string, unknown> | null; error: { message: string } | null };
+}
+
+export async function updateCheckOut(id: string, values: Record<string, unknown>) {
+  const supabase = createClient();
+  const currentDevice = values.device_fingerprint as string | undefined;
+
+  if (currentDevice) {
+    const recordResult = await supabase
+      .from("attendance_records")
+      .select("employee_id, employee:employee_id(registered_device_id)")
+      .eq("id", id)
+      .single();
+
+    const record = recordResult.data as { employee?: { registered_device_id?: string | null } | null } | null;
+    const registeredDevice = record?.employee?.registered_device_id;
+    if (registeredDevice && registeredDevice !== currentDevice) {
+      return { data: null, error: { message: "Checkout must be recorded from the registered device." } };
+    }
+  }
+
+  const result = await supabase
+    .from("attendance_records")
+    .update(values as never)
+    .eq("id", id)
+    .select()
+    .single();
+
+  return result as unknown as { data: Record<string, unknown> | null; error: { message: string } | null };
+}
+
+export async function notifyMissingAttendanceLocation(action: "check_in" | "check_out") {
+  try {
+    const response = await fetch("/api/attendance/missing-location", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const json = await response.json().catch(() => ({})) as { data?: Record<string, unknown>; message?: string; error?: string };
+    if (!response.ok) return { data: null, error: { message: json.message || json.error || "تعذر إرسال تنبيه الموارد البشرية." } };
+    return { data: json.data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error: { message: error instanceof Error ? error.message : "تعذر الاتصال بالخادم." } };
+  }
+}
+
+export async function uploadAttendanceSelfie(
+  orgId: string,
+  employeeId: string,
+  workDate: string,
+  file: File
+) {
+  const supabase = createClient();
+  const fileExt = file.name.split(".").pop() || "jpg";
+  const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+  const filePath = `${orgId}/${employeeId}/${workDate}/${fileName}`;
+
+  const result = await supabase
+    .storage
+    .from("attendance-selfies")
+    .upload(filePath, file, { upsert: true });
+
+  return result as unknown as { data: { path: string } | null; error: { message: string } | null };
+}
